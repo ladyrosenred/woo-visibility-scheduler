@@ -1,0 +1,109 @@
+/* Alap Tailwind osztályok kiegészítése */
+.tw-container { max-width: 1200px; width: 95%; margin: 20px auto; }
+.tw-card { 
+    background: white; 
+    border-radius: 0.5rem; 
+    box-shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1); 
+    padding: 1.5rem; 
+    margin-bottom: 1.5rem; 
+}
+.tw-card-header { 
+    border-bottom: 1px solid #e5e7eb; 
+    padding-bottom: 1rem; 
+    margin-bottom: 1rem; 
+}
+
+/* Státusz jelzők */
+.status-badge {
+    display: inline-block;
+    padding: 0.25rem 0.75rem;
+    border-radius: 9999px;
+    font-size: 0.875rem;
+    font-weight: 500;
+}
+.status-draft { background-color: #fef3c7; color: #92400e; }
+.status-private { background-color: #fee2e2; color: #991b1b; }
+.status-publish { background-color: #d1fae5; color: #065f46; }
+
+/* Táblázat stílusok */
+.tw-table { 
+    width: 100%; 
+    border-collapse: separate; 
+    border-spacing: 0; 
+}
+.tw-table th { 
+    background: #f3f4f6;
+    padding: 0.75rem 1rem;
+    text-align: left;
+    font-weight: 600;
+    color: #374151;
+    border-bottom: 2px solid #e5e7eb;
+}
+.tw-table td {
+    padding: 0.75rem 1rem;
+    border-bottom: 1px solid #e5e7eb;
+}
+.tw-table tr:hover td { 
+    background-color: #f9fafb; 
+}
+
+/* Gomb stílusok */
+.tw-btn {
+    display: inline-block;
+    padding: 0.5rem 1rem;
+    border-radius: 0.375rem;
+    font-weight: 500;
+    text-align: center;
+    transition: all 150ms ease-in-out;
+    cursor: pointer; 
+}
+.tw-btn-red {
+    background-color: #ef4444;
+    color: white;
+    border: none;
+}
+.tw-btn-red:hover {
+    background-color: #dc2626;
+}
+.tw-btn-blue {
+    background-color: #3b82f6;
+    color: white;
+    border: none;
+}
+.tw-btn-blue:hover {
+    background-color: #2563eb;
+}
+
+/* Meta box specifikus stílusok */
+.visibility-scheduler-meta input[type="datetime-local"],
+.visibility-scheduler-meta select {
+    width: 100%;
+    padding: 0.5rem;
+    border: 1px solid #e5e7eb;
+    border-radius: 0.375rem;
+    margin-bottom: 1rem;
+}
+
+.visibility-scheduler-meta label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+}
+
+/* Reszponzív javítások */
+@media (max-width: 782px) {
+    .tw-table {
+        display: block;
+        overflow-x: auto;
+    }
+    
+    .tw-card {
+        padding: 1rem;
+    }
+}
+
+.run_scheduler_now_btn
+{
+    margin-top:10px;
+    margin-bottom:20px;
+}

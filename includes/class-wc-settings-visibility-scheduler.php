@@ -72,7 +72,7 @@ class WC_Settings_Visibility_Scheduler extends WC_Settings_Page {
             $offset_prefix = $offset < 0 ? '-' : '+';
             $offset_formatted = gmdate('H:i', abs($offset));
             
-            $pretty_offset = "UTC{$offset_prefix}${offset_formatted}";
+            $pretty_offset = "UTC{$offset_prefix}{$offset_formatted}";
             
             $timezones[$timezone] = "({$pretty_offset}) $timezone";
         }

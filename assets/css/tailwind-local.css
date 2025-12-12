@@ -1,0 +1,19 @@
+.tw-flex { display: flex; }
+.tw-justify-between { justify-content: space-between; }
+.tw-items-center { align-items: center; }
+
+.tw-text-xl { font-size: 1.25rem; line-height: 1.75rem; }
+.tw-font-bold { font-weight: 700; }
+
+.tw-bg-blue-50 { background-color: #eff6ff; }
+.tw-border-l-4 { border-left-width: 4px; border-left-style: solid; }
+.tw-border-blue-500 { border-color: #3b82f6; }
+.tw-p-4 { padding: 1rem; }
+.tw-rounded { border-radius: 0.375rem; }
+.tw-mb-4 { margin-bottom: 1rem; }
+.tw-mb-2 { margin-bottom: 0.5rem; }
+
+.tw-text-gray-600 { color: #4b5563; }
+.tw-text-center { text-align: center; }
+.tw-text-blue-600 { color: #2563eb; }
+.hover\:tw-text-blue-800:hover { color: #1e40af; }

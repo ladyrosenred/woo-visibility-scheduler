@@ -1,9 +1,8 @@
 === WooCommerce Product Visibility Scheduler ===
-Contributors: brigittavarga
 Tags: woocommerce, products, scheduler, visibility, automation
 Requires at least: 5.0
 Tested up to: 6.4.2
-Stable tag: 1.0
+Stable tag: 1.0.1
 Requires PHP: 7.4
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
@@ -49,6 +48,17 @@ Az ütemezés a következő esetekben használható:
 
 == Changelog ==
 
+= 1.0.1 =
+* Admin ütemezés lista: időpont megjelenítés javítva (UTC -> kiválasztott időzóna), és Időzóna oszlop hozzáadva
+* Termékenkénti időzóna mentése (`_visibility_scheduler_timezone`) és használata (fallback: plugin beállítás, majd WP webhely időzóna)
+* Metabox: dátum + idő inputok, helyes időzóna-konverzió megjelenítéskor és mentéskor
+* Időzóna validálása mentés előtt (invalid értékek nem kerülnek mentésre)
+* Kézi futtatás ("azonnali futtatás") egyértelmű visszajelzése: esedékes tételek száma / következő esedékes időpont
+* Uninstall: a delete_data beállítás tiszteletben tartása, új meta kulcs törlése delete_data=yes esetén
+* Admin UI: Tailwind CDN eltávolítva, lokális CSS betöltés
+* Cron ütemezés finomítva (csak akkor schedule, ha hiányzik)
+* Törlés hardening az admin listában (capability + sanitization)
+
 = 1.0 =
 * Első kiadás
 * Alapvető ütemezési funkciók
@@ -56,6 +66,9 @@ Az ütemezés a következő esetekben használható:
 * Admin felület
 
 == Upgrade Notice ==
+
+= 1.0.1 =
+Javítások: időzóna-kezelés, admin lista megjelenítés, kézi futtatás visszajelzés, uninstall viselkedés, cron finomítás.
 
 = 1.0 =
 Első stabil verzió

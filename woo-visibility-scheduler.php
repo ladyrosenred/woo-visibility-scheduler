@@ -2,7 +2,7 @@
 /**
  * Plugin Name: WooCommerce Product Visibility Scheduler
  * Description: Scheduled change of product visibility from private visibility to public and from draft state to public
- * Version: 1.0
+ * Version: 1.0.1
  * Author: Brigitta Varga
  */
 
@@ -55,7 +55,7 @@ class WC_Product_Visibility_Scheduler {
         add_action('wp_ajax_delete_product_schedule', array($this, 'handle_delete_schedule'));
 
            // Cron intervallum hozzáadása
-        add_filter('cron_schedules', array($this, 'add_cron_interval'));
+        add_filter('cron_schedules', array(__CLASS__, 'add_cron_interval'));
 
         
         // Cron hook hozzáadása
@@ -89,20 +89,19 @@ class WC_Product_Visibility_Scheduler {
         if ($hook === 'toplevel_page_visibility-scheduler' || 
             $hook === 'post.php' || 
             $hook === 'post-new.php') {
-            
-            // Tailwind CSS betöltése CDN-ről
+
             wp_enqueue_style(
-                'tailwindcss',
-                'https://cdn.tailwindcss.com/3.3.5',
+                'visibility-scheduler-tailwind',
+                plugin_dir_url(__FILE__) . 'assets/css/tailwind-local.css',
                 array(),
-                '3.3.5'
+                filemtime(plugin_dir_path(__FILE__) . 'assets/css/tailwind-local.css')
             );
 
             // Saját admin stílusok betöltése
             wp_enqueue_style(
                 'visibility-scheduler-admin',
                 plugin_dir_url(__FILE__) . 'assets/css/admin-styles.css',
-                array('tailwindcss'),
+                array('visibility-scheduler-tailwind'),
                 filemtime(plugin_dir_path(__FILE__) . 'assets/css/admin-styles.css')
             );
         }
@@ -110,16 +109,10 @@ class WC_Product_Visibility_Scheduler {
 
     public function ensure_cron_is_scheduled() {
         $next_run = wp_next_scheduled('visibility_scheduler_cron');
-        $current_time = time();
         
-        // Ha nincs következő futás vagy a következő futás ideje már elmúlt
-        if (!$next_run || $next_run < $current_time) {
-            // Először töröljük a régi ütemezést
-            wp_clear_scheduled_hook('visibility_scheduler_cron');
-            
-            // Új ütemezés beállítása
-            wp_schedule_event($current_time, 'every_15_minutes', 'visibility_scheduler_cron');
-            $this->log_message('Cron újraütemezve: ' . date('Y-m-d H:i:s', $current_time));
+        if (!$next_run) {
+            wp_schedule_event(time(), 'every_15_minutes', 'visibility_scheduler_cron');
+            $this->log_message('Cron ütemezés beállítva: every_15_minutes');
         }
     }
 
@@ -196,17 +189,17 @@ class WC_Product_Visibility_Scheduler {
     
         // Cron ütemezés beállítása
         if (!wp_next_scheduled('visibility_scheduler_cron')) {
+            add_filter('cron_schedules', array(__CLASS__, 'add_cron_interval'));
             wp_schedule_event(time(), 'every_15_minutes', 'visibility_scheduler_cron');
-           
+            remove_filter('cron_schedules', array(__CLASS__, 'add_cron_interval'));
         }
     }
 
-    public function add_cron_interval($schedules) {
+    public static function add_cron_interval($schedules) {
         $schedules['every_15_minutes'] = array(
             'interval' => 900,
             'display'  => '15 percenként'
         );
-        $this->log_message('Cron intervallum hozzáadva: every_15_minutes');
         return $schedules;
     }
 
@@ -223,6 +216,11 @@ class WC_Product_Visibility_Scheduler {
     
         // Minden cron törlése a hookra
         wp_clear_scheduled_hook('visibility_scheduler_cron');
+
+        $delete_data = get_option('visibility_scheduler_delete_data', 'no');
+        if ($delete_data !== 'yes') {
+            return;
+        }
     
         // Tábla törlése
         $table_name = $wpdb->prefix . 'scheduled_visibility_changes';
@@ -235,6 +233,7 @@ class WC_Product_Visibility_Scheduler {
         // Post meta törlése
         delete_post_meta_by_key('_schedule_type');
         delete_post_meta_by_key('_scheduled_visibility_change');
+        delete_post_meta_by_key('_visibility_scheduler_timezone');
     
         // Log fájl törlése
         $upload_dir = wp_upload_dir();
@@ -302,6 +301,9 @@ class WC_Product_Visibility_Scheduler {
             $scheduled_time->setTimezone($wp_timezone);
     
             $schedule_type = get_post_meta($change->product_id, '_schedule_type', true);
+            if ($schedule_type !== 'visibility' && $schedule_type !== 'status') {
+                $schedule_type = 'visibility';
+            }
             
             try {
                 // Először ellenőrizzük a jelenlegi státuszt
@@ -347,7 +349,7 @@ class WC_Product_Visibility_Scheduler {
                 $new_status = $product->get_status();
                 $new_visibility = $product->get_catalog_visibility();
                 
-                if ($new_status === 'publish' && $new_visibility === 'visible') {
+                if ($new_status === 'publish' && ($schedule_type === 'status' || $new_visibility === 'visible')) {
                     $success_products[] = sprintf('%s (ID: %d)', $product->get_name(), $change->product_id);
                     
                     // Jelöljük a változtatást befejezettként
@@ -439,7 +441,6 @@ class WC_Product_Visibility_Scheduler {
         
         // AJAX műveletek nonce-ai
         $delete_nonce = wp_create_nonce('delete_schedule_nonce');
-        $timezone_nonce = wp_create_nonce('timezone_nonce');
         
         global $wpdb;
         $table_name = $wpdb->prefix . 'scheduled_visibility_changes';
@@ -451,12 +452,32 @@ class WC_Product_Visibility_Scheduler {
         ));
         
         $timezones = DateTimeZone::listIdentifiers();
-        $current_timezone = get_option('visibility_scheduler_timezone', 'UTC');
+        $current_timezone = get_post_meta($post->ID, '_visibility_scheduler_timezone', true);
+        if (empty($current_timezone)) {
+            $current_timezone = get_option('visibility_scheduler_timezone', '');
+            if (empty($current_timezone)) {
+                $current_timezone = wp_timezone_string();
+            }
+            if (empty($current_timezone)) {
+                $current_timezone = 'UTC';
+            }
+        }
         
         $datetime = new DateTime('now', new DateTimeZone($current_timezone));
-        $current_time = $datetime->format('Y-m-d\TH:i');
+        $current_date = $datetime->format('Y-m-d');
         
         $schedule_type = $scheduled ? get_post_meta($post->ID, '_schedule_type', true) : 'visibility';
+
+        $scheduled_display = '';
+        $scheduled_date = '';
+        $scheduled_clock = '';
+        if ($scheduled && !empty($scheduled->scheduled_time)) {
+            $scheduled_dt = new DateTime($scheduled->scheduled_time, new DateTimeZone('UTC'));
+            $scheduled_dt->setTimezone(new DateTimeZone($current_timezone));
+            $scheduled_display = $scheduled_dt->format('Y-m-d H:i');
+            $scheduled_date = $scheduled_dt->format('Y-m-d');
+            $scheduled_clock = $scheduled_dt->format('H:i');
+        }
         ?>
         <div class="visibility-scheduler-settings">
             <?php 
@@ -495,18 +516,24 @@ class WC_Product_Visibility_Scheduler {
                 </p>
 
                 <p>
-                    <label for="scheduled_visibility_time">Publikálás időpontja:</label><br>
-                    <input type="datetime-local" 
-                           id="scheduled_visibility_time" 
-                           name="scheduled_visibility_time"
-                           value="<?php echo esc_attr($scheduled ? date('Y-m-d\TH:i', strtotime($scheduled->scheduled_time)) : ''); ?>"
-                           min="<?php echo esc_attr($current_time); ?>"
+                    <label for="scheduled_visibility_date">Publikálás időpontja:</label><br>
+                    <input type="date"
+                           id="scheduled_visibility_date"
+                           name="scheduled_visibility_date"
+                           value="<?php echo esc_attr($scheduled_date); ?>"
+                           min="<?php echo esc_attr($current_date); ?>"
+                    />
+                    <input type="time"
+                           id="scheduled_visibility_clock"
+                           name="scheduled_visibility_clock"
+                           value="<?php echo esc_attr($scheduled_clock); ?>"
+                           step="60"
                     />
                 </p>
 
                 <?php if ($scheduled) : ?>
                     <p class="description">
-                        Jelenlegi ütemezés: <?php echo date('Y-m-d H:i', strtotime($scheduled->scheduled_time)); ?> 
+                        Jelenlegi ütemezés: <?php echo esc_html($scheduled_display); ?> 
                         (<?php echo $schedule_type === 'visibility' ? 'Láthatóság' : 'Státusz'; ?> változtatás)
                     </p>
                     <button type="button" class="button delete-schedule" 
@@ -519,25 +546,6 @@ class WC_Product_Visibility_Scheduler {
                 
                 <script type="text/javascript">
                     jQuery(document).ready(function($) {
-                        // Időzóna változás kezelése
-                        $('#scheduled_timezone').on('change', function() {
-                            $.ajax({
-                                url: ajaxurl,
-                                type: 'POST',
-                                data: {
-                                    action: 'get_timezone_time',
-                                    timezone: $(this).val(),
-                                    nonce: '<?php echo esc_js($timezone_nonce); ?>'
-                                },
-                                success: function(response) {
-                                    if (response.success) {
-                                        $('#scheduled_visibility_time').val(response.data.current_time);
-                                        $('#scheduled_visibility_time').attr('min', response.data.current_time);
-                                    }
-                                }
-                            });
-                        });
-
                         // Ütemezés törlése
                         $('.delete-schedule').on('click', function(e) {
                             e.preventDefault();
@@ -578,19 +586,6 @@ class WC_Product_Visibility_Scheduler {
         <?php
     }
 
-    // Ajax handler az időzóna időpont lekéréséhez
-    public function get_timezone_time()
-    {
-        check_ajax_referer('timezone_nonce', 'nonce');
-
-        $timezone = sanitize_text_field($_POST['timezone']);
-        $datetime = new DateTime('now', new DateTimeZone($timezone));
-
-        wp_send_json_success(array(
-        'current_time' => $datetime->format('Y-m-d\TH:i')
-        ));
-    }
-
     // Ajax handler metódus:
     public function handle_delete_schedule()
     {
@@ -623,26 +618,6 @@ class WC_Product_Visibility_Scheduler {
         }
     }
 
-    // Ajax handler az ütemezés törléséhez
-    public function delete_schedule() {
-        check_ajax_referer('delete_schedule_nonce', 'nonce');
-
-        global $wpdb;
-        $table_name = $wpdb->prefix . 'scheduled_visibility_changes';
-
-        $product_id = intval($_POST['product_id']);
-
-        $wpdb->delete(
-            $table_name,
-            array('product_id' => $product_id, 'completed' => 0),
-            array('%d', '%d')
-        );
-
-        delete_post_meta($product_id, '_schedule_type');
-
-        wp_send_json_success();
-    }
-
     public function save_scheduling_meta($post_id) {
         // Autosave ellenőrzés
         if (defined('DOING_AUTOSAVE') && DOING_AUTOSAVE) {
@@ -665,16 +640,40 @@ class WC_Product_Visibility_Scheduler {
 
         // Időzóna mentése
         if (isset($_POST['scheduled_timezone'])) {
-            update_option('visibility_scheduler_timezone', sanitize_text_field($_POST['scheduled_timezone']));
+            $timezone = sanitize_text_field($_POST['scheduled_timezone']);
+            // Validate timezone
+            if (in_array($timezone, DateTimeZone::listIdentifiers(), true)) {
+                update_post_meta($post_id, '_visibility_scheduler_timezone', $timezone);
+            } else {
+                $this->log_message('Invalid timezone provided: ' . $timezone);
+            }
         }
 
-        if (isset($_POST['scheduled_visibility_time']) && !empty($_POST['scheduled_visibility_time'])) {
+        $scheduled_time = '';
+        if (!empty($_POST['scheduled_visibility_date']) && !empty($_POST['scheduled_visibility_clock'])) {
+            $scheduled_time = sanitize_text_field($_POST['scheduled_visibility_date']) . 'T' . sanitize_text_field($_POST['scheduled_visibility_clock']);
+        } elseif (!empty($_POST['scheduled_visibility_time'])) {
             $scheduled_time = sanitize_text_field($_POST['scheduled_visibility_time']);
+        }
+
+        if (!empty($scheduled_time)) {
             $schedule_type = sanitize_text_field($_POST['schedule_type']);
 
             // Időzóna konvertálás
-            $timezone = get_option('visibility_scheduler_timezone', 'UTC');
-            $datetime = new DateTime($scheduled_time, new DateTimeZone($timezone));
+            $timezone = get_post_meta($post_id, '_visibility_scheduler_timezone', true);
+            if (empty($timezone)) {
+                $timezone = get_option('visibility_scheduler_timezone', '');
+                if (empty($timezone)) {
+                    $timezone = wp_timezone_string();
+                }
+                if (empty($timezone)) {
+                    $timezone = 'UTC';
+                }
+            }
+            $datetime = DateTime::createFromFormat('Y-m-d\\TH:i', $scheduled_time, new DateTimeZone($timezone));
+            if (!$datetime) {
+                return;
+            }
             $datetime->setTimezone(new DateTimeZone('UTC'));
             $utc_time = $datetime->format('Y-m-d H:i:s');
 
@@ -737,22 +736,69 @@ class WC_Product_Visibility_Scheduler {
 
         // Törlés feldolgozása
         if (isset($_POST['action']) && $_POST['action'] === 'delete' && isset($_POST['schedule_id'])) {
-            check_admin_referer('delete_schedule_' . $_POST['schedule_id']);
-    
-            $schedule_id = intval($_POST['schedule_id']);
-            $wpdb->delete(
+            if (!current_user_can('manage_woocommerce')) {
+                wp_die('Nem megfelelő jogosultság');
+            }
+
+            $schedule_id = absint($_POST['schedule_id']);
+            check_admin_referer('delete_schedule_' . $schedule_id);
+
+            $product_id = (int) $wpdb->get_var(
+                $wpdb->prepare(
+                    "SELECT product_id FROM $table_name WHERE id = %d",
+                    $schedule_id
+                )
+            );
+
+            $deleted = $wpdb->delete(
                 $table_name,
                 array('id' => $schedule_id),
                 array('%d')
             );
-    
-            echo '<div class="notice notice-success is-dismissible"><p>Az ütemezés sikeresen törölve!</p></div>';
+
+            if ($deleted !== false) {
+                if ($product_id > 0) {
+                    delete_post_meta($product_id, '_schedule_type');
+                }
+                echo '<div class="notice notice-success is-dismissible"><p>Az ütemezés sikeresen törölve!</p></div>';
+            } else {
+                echo '<div class="notice notice-error is-dismissible"><p>Hiba történt az ütemezés törlésekor.</p></div>';
+            }
         }
     
         // Kézi futtatás feldolgozása
         if (isset($_POST['run_scheduler_now']) && check_admin_referer('run_scheduler_now')) {
-            $this->process_scheduled_changes();
-            echo '<div class="notice notice-success is-dismissible"><p>Az ütemezett feladatok feldolgozása megtörtént!</p></div>';
+            $utc_timezone = new DateTimeZone('UTC');
+            $now_utc = new DateTime('now', $utc_timezone);
+            $due_count = (int) $wpdb->get_var(
+                $wpdb->prepare(
+                    "SELECT COUNT(*) FROM $table_name WHERE completed = 0 AND scheduled_time <= %s",
+                    $now_utc->format('Y-m-d H:i:s')
+                )
+            );
+
+            if ($due_count === 0) {
+                $next_scheduled_time = $wpdb->get_var(
+                    "SELECT MIN(scheduled_time) FROM $table_name WHERE completed = 0"
+                );
+
+                $next_display = '';
+                if (!empty($next_scheduled_time)) {
+                    $wp_timezone = new DateTimeZone(wp_timezone_string());
+                    $next_dt = new DateTime($next_scheduled_time, $utc_timezone);
+                    $next_dt->setTimezone($wp_timezone);
+                    $next_display = $next_dt->format('Y-m-d H:i:s') . ' (' . $wp_timezone->getName() . ')';
+                }
+
+                echo '<div class="notice notice-info is-dismissible"><p>Nincs esedékes ütemezés (0 db). ';
+                if (!empty($next_display)) {
+                    echo 'Következő esedékes: ' . esc_html($next_display) . '.';
+                }
+                echo '</p></div>';
+            } else {
+                $this->process_scheduled_changes();
+                echo '<div class="notice notice-success is-dismissible"><p>Az ütemezett feladatok feldolgozása megtörtént! (' . esc_html((string) $due_count) . ' db)</p></div>';
+            }
         }
     
         // Lekérjük az összes aktív ütemezést
@@ -821,13 +867,14 @@ class WC_Product_Visibility_Scheduler {
                             <th>Termék</th>
                             <th>Jelenlegi státusz</th>
                             <th>Ütemezett időpont</th>
+                            <th>Időzóna</th>
                             <th>Műveletek</th>
                         </tr>
                     </thead>
                     <tbody>
                         <?php if (empty($scheduled_changes)) : ?>
                             <tr>
-                                <td colspan="4" class="tw-text-gray-600 tw-text-center">
+                                <td colspan="5" class="tw-text-gray-600 tw-text-center">
                                     Nincs aktív ütemezés.
                                 </td>
                             </tr>
@@ -847,9 +894,24 @@ class WC_Product_Visibility_Scheduler {
                                     </td>
                                     <td>
                                         <?php
-                                        $date = new DateTime($change->scheduled_time);
-                                        echo $date->format('Y-m-d H:i:s');
+                                        $product_timezone = get_post_meta($change->product_id, '_visibility_scheduler_timezone', true);
+                                        if (empty($product_timezone)) {
+                                            $product_timezone = get_option('visibility_scheduler_timezone', '');
+                                            if (empty($product_timezone)) {
+                                                $product_timezone = wp_timezone_string();
+                                            }
+                                            if (empty($product_timezone)) {
+                                                $product_timezone = 'UTC';
+                                            }
+                                        }
+
+                                        $date = new DateTime($change->scheduled_time, new DateTimeZone('UTC'));
+                                        $date->setTimezone(new DateTimeZone($product_timezone));
+                                        echo esc_html($date->format('Y-m-d H:i:s'));
                                         ?>
+                                    </td>
+                                    <td>
+                                        <?php echo esc_html($product_timezone); ?>
                                     </td>
                                     <td>
                                         <form method="post" style="display:inline;">
@@ -870,120 +932,7 @@ class WC_Product_Visibility_Scheduler {
                 </table>
             </div>
         </div>
- 
-        <script type="text/javascript">
-      jQuery(document).ready(function($) {
-            $('.delete-schedule').on('click', function(e) {
-                e.preventDefault();
-                var button = $(this);
-                if(confirm('Biztosan törli az ütemezést?')) {
-                    $.ajax({
-                        url: ajaxurl,
-                        type: 'POST',
-                        data: {
-                            action: 'delete_product_schedule',
-                            nonce: button.data('nonce'),
-                            product_id: button.data('product-id')
-                        },
-                        beforeSend: function() {
-                            button.prop('disabled', true).addClass('tw-opacity-50');
-                        },
-                        success: function(response) {
-                            if(response.success) {
-                                location.reload();
-                            } else {
-                                alert('Hiba történt az ütemezés törlésekor.');
-                                button.prop('disabled', false).removeClass('tw-opacity-50');
-                            }
-                        },
-                        error: function() {
-                            alert('Hiba történt a szerverrel való kommunikáció során.');
-                            button.prop('disabled', false).removeClass('tw-opacity-50');
-                        }
-                    });
-                }
-            });
-        });
-        </script>
         <?php
-    }
-
-    // Ajax handler a notice dismissal-hoz
-    public static function dismiss_visibility_notice()
-    {
-        // Jogosultság és nonce ellenőrzés
-        if (!current_user_can('manage_woocommerce') || 
-            !check_ajax_referer('dismiss_notice', '_wpnonce', false)) {
-            wp_send_json_error('Nem megfelelő jogosultság');
-            return;
-        }
-
-        $notice_key = isset($_POST['notice_key']) ? sanitize_key($_POST['notice_key']) : '';
-        if (!empty($notice_key)) {
-            $user_id = get_current_user_id();
-            update_user_meta($user_id, 'dismissed_notice_' . $notice_key, true);
-            wp_send_json_success();
-        } else {
-            wp_send_json_error('Érvénytelen notice key');
-        }
-    }
-
-    // Notice dismissal kezelése
-    public static function notice_dismissal()
-    {
-        if (isset($_GET['notice_dismissed'])) {
-            check_admin_referer('dismiss_notice', 'notice_nonce');
-            
-            $notice_key = isset($_GET['notice_key']) ? sanitize_key($_GET['notice_key']) : '';
-            if (!empty($notice_key)) {
-                $user_id = get_current_user_id();
-                update_user_meta($user_id, 'dismissed_notice_' . $notice_key, true);
-            }
-        }
-    }
-
-    // JavaScript hozzáadása az admin notice-ok dismissal kezeléséhez
-    public static function add_dismissal_script()
-    {
-        ?>
-        <script>
-        jQuery(document).ready(function($) {
-            $('.notice-visibility-scheduler').on('click', '.notice-dismiss', function(e) {
-                var $notice = $(this).closest('.notice');
-                var noticeKey = $notice.data('notice-key');
-                
-                $.ajax({
-                    url: '<?php echo admin_url('admin-ajax.php'); ?>',
-                    data: {
-                        action: 'dismiss_visibility_notice',
-                        notice_key: noticeKey,
-                        _wpnonce: '<?php echo wp_create_nonce("dismiss_notice"); ?>'
-                    },
-                    type: 'POST',
-                    success: function() {
-                        $notice.fadeOut();
-                    }
-                });
-            });
-        });
-        </script>
-        <?php
-    }
-
-    // Azonnali feldolgozás teszteléshez (csak admin felületen)
-    public static function process_visibility_now()
-    {
-        if (is_admin() && isset($_GET['process_visibility_now'])) {
-            // Jogosultság ellenőrzés
-            if (!current_user_can('manage_woocommerce')) {
-                wp_die('Nem megfelelő jogosultság');
-                return;
-            }
-
-            global $wc_visibility_scheduler;
-            $wc_visibility_scheduler->process_scheduled_changes();
-            wp_die('Feldolgozás befejezve. Ellenőrizd a hibanaplót a részletekért.');
-        }
     }
 
     /**
